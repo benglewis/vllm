@@ -22,6 +22,7 @@ from vllm.engine.arg_utils import (
     optional_type,
     parse_type,
 )
+from vllm.transformers_utils.config import maybe_override_with_speculators
 from vllm.utils.argparse_utils import FlexibleArgumentParser
 
 
@@ -523,3 +524,54 @@ def test_human_readable_model_len():
     for invalid in ["1a", "pwd", "10.24", "1.23M", "1.22T"]:
         with pytest.raises(ArgumentError):
             parser.parse_args(["--max-model-len", invalid])
+
+
+def test_speculators_override_forwards_hf_token(monkeypatch: pytest.MonkeyPatch):
+    captured_arguments: dict[str, object] = {}
+
+    def fake_get_config_dict(model_name: str, revision: str | None = None, **kwargs):
+        captured_arguments["model_name"] = model_name
+        captured_arguments["revision"] = revision
+        captured_arguments["kwargs"] = kwargs
+        return ({}, None)
+
+    monkeypatch.setattr(
+        "vllm.transformers_utils.config.PretrainedConfig.get_config_dict",
+        fake_get_config_dict,
+    )
+
+    maybe_override_with_speculators(
+        model="dummy-model",
+        tokenizer=None,
+        trust_remote_code=False,
+        revision="dummy-revision",
+        hf_token="hf-secret-token",
+    )
+
+    get_config_kwargs = captured_arguments["kwargs"]
+    assert isinstance(get_config_kwargs, dict)
+    assert get_config_kwargs.get("token") == "hf-secret-token"
+
+
+def test_create_engine_config_passes_hf_token_to_speculator_override(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    engine_args = EngineArgs(model="dummy-model", hf_token="hf-secret-token")
+
+    monkeypatch.setattr(
+        "vllm.engine.arg_utils.current_platform.pre_register_and_update",
+        lambda: None,
+    )
+    monkeypatch.setattr("vllm.engine.arg_utils.envs.validate_environ", lambda *_: None)
+
+    def fake_maybe_override_with_speculators(**kwargs):
+        assert kwargs.get("hf_token") == "hf-secret-token"
+        raise RuntimeError("stop-after-speculator-check")
+
+    monkeypatch.setattr(
+        "vllm.engine.arg_utils.maybe_override_with_speculators",
+        fake_maybe_override_with_speculators,
+    )
+
+    with pytest.raises(RuntimeError, match="stop-after-speculator-check"):
+        engine_args.create_engine_config()

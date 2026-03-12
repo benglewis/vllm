@@ -505,6 +505,7 @@ def maybe_override_with_speculators(
     trust_remote_code: bool,
     revision: str | None = None,
     vllm_speculative_config: dict[str, Any] | None = None,
+    hf_token: bool | str | None = None,
     **kwargs,
 ) -> tuple[str, str | None, dict[str, Any] | None]:
     """
@@ -519,6 +520,7 @@ def maybe_override_with_speculators(
         trust_remote_code: Whether to trust remote code
         revision: Model revision
         vllm_speculative_config: Existing vLLM speculative config
+        hf_token: Hugging Face token used to access gated configs
 
     Returns:
         Tuple of (resolved_model, resolved_tokenizer, speculative_config)
@@ -535,6 +537,7 @@ def maybe_override_with_speculators(
     config_dict, _ = PretrainedConfig.get_config_dict(
         model if gguf_model_repo is None else gguf_model_repo,
         revision=revision,
+        token=hf_token,
         **without_trust_remote_code(kwargs),
     )
     speculators_config = config_dict.get("speculators_config")
